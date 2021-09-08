@@ -709,7 +709,33 @@ def cj_type(imm, *, opcode, funct3, cs=None):
 
     return code
 
+# pico-rv 32 interrupt handling for riscv core from
+# https://github.com/cliffordwolf/picorv32
 
+#0000000 ----- 000XX --- XXXXX 0001011
+#f7      rs2   qs    f3  rd    opcode
+GETQ       = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000000)
+
+#0000001 ----- XXXXX --- 000XX 0001011
+#f7      rs2   rs    f3  qd    opcode
+SETQ       = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000001)
+
+#0000010 ----- 00000 --- 00000 0001011
+#f7      rs2   rs    f3  rd    opcode
+RETIRQ     = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000010)
+
+#0000011 ----- XXXXX --- XXXXX 0001011
+#f7      rs2   rs    f3  rd    opcode
+MASKIRQ    = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000011)
+
+#0000100 ----- 00000 --- XXXXX 0001011
+#f7      rs2   rs    f3  rd    opcode
+WAITIRQ    = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000100) 
+
+#0000101 ----- XXXXX --- XXXXX 0001011
+#f7      rs2   rs    f3  rd    opcode
+TIMER      = partial(r_type,   opcode=0b0001011, funct3=0b000, funct7=0b0000101)
+ 
 # RV32I Base Integer Instruction Set
 LUI        = partial(u_type,   opcode=0b0110111)
 AUIPC      = partial(u_type,   opcode=0b0010111)
@@ -827,6 +853,12 @@ R_TYPE_INSTRUCTIONS = {
     'divu':       DIVU,
     'rem':        REM,
     'remu':       REMU,
+    'getq':       GETQ,
+    'setq':       SETQ,
+    'retirq':     RETIRQ,
+    'maskirq':    MASKIRQ,
+    'waitirq':    WAITIRQ,
+    'timer':      TIMER
 }
 
 I_TYPE_INSTRUCTIONS = {
@@ -2248,10 +2280,49 @@ def parse_item(line_tokens):
         return Align(line, alignment)
     # r-type instructions
     elif head in R_TYPE_INSTRUCTIONS:
-        if len(tokens) != 4:
+        tr_q = lambda x: 'zero' if x == 'q0' else 'ra' if x == 'q1' else 'sp' if x == 'q2' else 'gp' if x == 'q3' else None     
+        
+        
+        if head == 'getq':
+            (name, rd, qreg) = tokens
+            rs2 = 'zero'
+            rs1 = tr_q(qreg)
+            if(not rs1):
+                raise AssemblerError('picorv32 q registers are q0...q3, unhandled for {}'.format(qreg), line)
+        elif head == 'setq':
+            (name, qreg, rs1) = tokens
+            rs2 = 'zero'
+            rd = tr_q(qreg)
+            if(not rd):
+                raise AssemblerError('picorv32 q registers are q0...q3, unhandled for {}'.format(qreg), line)
+        elif head == 'retirq':
+            name = head
+            rd = 'zero'
+            rs1 = 'zero'
+            rs2 = 'zero'
+            if len(tokens) != 1:
+                raise AssemblerError('picorv32 retirq doesn\'t take registers', line)
+        elif head == 'maskirq':
+            name, rd, rs1 = tokens
+            rs2 = 'zero'
+            if len(tokens) != 3:
+                raise AssemblerError('picorv32 maskirq takes 2 registers', line)
+        elif head == 'waitirq':
+            name, rd = tokens
+            rs1 = 'zero'
+            rs2 = 'zero'
+            if len(tokens) != 2:
+                raise AssemblerError('picorv32 waitirq takes 1 register', line)
+        elif head == 'timer':
+            name, rd, rs1 = tokens
+            rs2 = 'zero'
+            if len(tokens) != 3:
+                raise AssemblerError('picorv32 timer takes 2 reigsters', line)
+
+        elif len(tokens) != 4:
             raise AssemblerError('r-type instructions require exactly 3 args', line)
-        name, rd, rs1, rs2 = tokens
-        name = name.lower()
+            name, rd, rs1, rs2 = tokens
+            name = name.lower()
         return RTypeInstruction(line, name, rd, rs1, rs2)
     # i-type instructions
     elif head in I_TYPE_INSTRUCTIONS:
